@@ -82,124 +82,189 @@ type JSONResults struct {
 }
 
 func main() {
-
-	var (
-		broker      = flag.String("broker", "tcp://localhost:1883", "MQTT broker endpoint as scheme://host:port")
-		topic       = flag.String("topic", "/test", "MQTT topic for outgoing messages")
-		username    = flag.String("username", "", "MQTT username (empty if auth disabled)")
-		password    = flag.String("password", "", "MQTT password (empty if auth disabled)")
-		pubqos      = flag.Int("pubqos", 1, "QoS for published messages")
-		subqos      = flag.Int("subqos", 1, "QoS for subscribed messages")
-		size        = flag.Int("size", 100, "Size of the messages payload (bytes)")
-		count       = flag.Int("count", 100, "Number of messages to send per pubclient")
-		clients     = flag.Int("clients", 10, "Number of clients pair to start")
-                keepalive   = flag.Int("keepalive", 60, "Keep alive period in seconds")
-		format      = flag.String("format", "text", "Output format: text|json")
-		quiet       = flag.Bool("quiet", false, "Suppress logs while running")
-	)
-
-	flag.Parse()
-	if *clients < 1 {
-		log.Fatal("Invlalid arguments")
-	}
-
-	//start subscribe
-
-	subResCh := make(chan *SubResults)
-	jobDone := make(chan bool)
-	subDone := make(chan bool)
-	subCnt := 0
-
-	if !*quiet {
-		log.Printf("Starting subscribe..\n")
-	}
-	
-	for i := 0; i < *clients; i++ {
-		sub := &SubClient{
-			ID:         i,
-			BrokerURL:  *broker,
-			BrokerUser: *username,
-			BrokerPass: *password,
-			SubTopic:   *topic + "-" + strconv.Itoa(i),
-			SubQoS:     byte(*subqos),
-			KeepAlive:  *keepalive,
-			Quiet:      *quiet,
-		}
-		go sub.run(subResCh, subDone, jobDone)
-	}
-
-	SUBJOBDONE:
-	for {
-		select {
-		case <-subDone:
-			subCnt++
-			if subCnt==*clients {
-				if !*quiet {
-					log.Printf("all subscribe job done.\n")
-				}
-				break SUBJOBDONE
-			}
-		}
-	}
-
-	//start publish
-	if !*quiet {
-		log.Printf("Starting publish..\n")
-	}
-	pubResCh := make(chan *PubResults)
-	start := time.Now()
-	for i := 0; i < *clients; i++ {
-		c := &PubClient{
-			ID:         i,
-			BrokerURL:  *broker,
-			BrokerUser: *username,
-			BrokerPass: *password,
-			PubTopic:   *topic + "-" + strconv.Itoa(i),
-			MsgSize:    *size,
-			MsgCount:   *count,
-			PubQoS:     byte(*pubqos),
-                        KeepAlive:  *keepalive,
-			Quiet:      *quiet,
-		}
-		go c.run(pubResCh)
-	}
-
-	// collect the publish results
-	pubresults := make([]*PubResults, *clients)
-	for i := 0; i < *clients; i++ {
-		pubresults[i] = <-pubResCh
-	}
-	totalTime := time.Now().Sub(start)
-	pubtotals := calculatePublishResults(pubresults, totalTime)
-
-	for i:=0; i<3; i++ {
-		time.Sleep(1*time.Second)
-		if !*quiet {
-			log.Printf("Benchmark will stop after %v seconds.\n", 3-i)
-		}
-	}
-
-	// notify subscriber that job done
-	for i := 0; i < *clients; i++ {
-		jobDone <- true
-	}
-
-	// collect subscribe results
-	subresults := make([]*SubResults, *clients)
-	for i := 0; i < *clients; i++ {
-		subresults[i] = <-subResCh
-	}
-
-	// collect the sub results
-	subtotals := calculateSubscribeResults(subresults,pubresults)
-
-	// print stats
-	printResults(pubresults, pubtotals, subresults, subtotals, *format)
-
-	if !*quiet {
-		log.Printf("All jobs done.\n")
-	}
+   // criando as flags que armazenaram os argumentos do terminal
+   var (
+       broker    = flag.String("broker", "tcp://localhost:1883", "MQTT broker endpoint as scheme://host:port")
+       topic     = flag.String("topic", "/test", "MQTT topic for outgoing messages")
+       fin       = flag.Bool("fin", false, "Allows fan-in tests")
+       fout      = flag.Bool("fout", false, "Allows fan-out tests")
+       username  = flag.String("username", "", "MQTT username (empty if auth disabled)")
+       password  = flag.String("password", "", "MQTT password (empty if auth disabled)")
+       pubqos    = flag.Int("pubqos", 1, "QoS for published messages")
+       subqos    = flag.Int("subqos", 1, "QoS for subscribed messages")
+       size      = flag.Int("size", 100, "Size of the messages payload (bytes)")
+       count     = flag.Int("count", 100, "Number of messages to send per pubclient")
+       clients   = flag.Int("clients", 10, "Number of clients pair to start")
+       keepalive = flag.Int("keepalive", 60, "Keep alive period in seconds")
+       format    = flag.String("format", "text", "Output format: text|json")
+       quiet     = flag.Bool("quiet", false, "Suppress logs while running")
+   )
+ 
+   flag.Parse()
+   if *clients < 1 {
+       log.Fatal("Invalid arguments")
+   }
+ 
+   if *fin && *fout {
+       log.Fatal("Invalid arguments")
+   }
+ 
+   //start subscribe
+ 
+   subResCh := make(chan *SubResults)
+   jobDone := make(chan bool)
+   subDone := make(chan bool)
+   subCnt := 0
+ 
+   if !*quiet {
+       log.Printf("Starting subscribe..\n")
+   }
+ 
+   for i := 0; i < *clients; i++ {
+       if *fin {
+           sub := &SubClient{
+               ID:         i,
+               BrokerURL:  *broker,
+               BrokerUser: *username,
+               BrokerPass: *password,
+               SubTopic:   *topic,
+               SubQoS:     byte(*subqos),
+               KeepAlive:  *keepalive,
+               Quiet:      *quiet,
+           }
+           go sub.run(subResCh, subDone, jobDone)
+       } else if *fout {
+           sub := &SubClient{
+               ID:         i,
+               BrokerURL:  *broker,
+               BrokerUser: *username,
+               BrokerPass: *password,
+               SubTopic:   *topic,
+               SubQoS:     byte(*subqos),
+               KeepAlive:  *keepalive,
+               Quiet:      *quiet,
+           }
+           go sub.run(subResCh, subDone, jobDone)
+           break
+       } else {
+           sub := &SubClient{
+               ID:         i,
+               BrokerURL:  *broker,
+               BrokerUser: *username,
+               BrokerPass: *password,
+               SubTopic:   *topic + "-" + strconv.Itoa(i),
+               SubQoS:     byte(*subqos),
+               KeepAlive:  *keepalive,
+               Quiet:      *quiet,
+           }
+           go sub.run(subResCh, subDone, jobDone)
+       }
+   }
+ 
+SUBJOBDONE:
+   for {
+       select {
+       case <-subDone:
+           subCnt++
+           if subCnt == *clients {
+               if !*quiet {
+                   log.Printf("all subscribe job done.\n")
+               }
+               break SUBJOBDONE
+           }
+       }
+   }
+ 
+   //start publish
+   if !*quiet {
+       log.Printf("Starting publish..\n")
+   }
+   pubResCh := make(chan *PubResults)
+   start := time.Now()
+   for i := 0; i < *clients; i++ {
+       if *fout {
+           c := &PubClient{
+               ID:         i,
+               BrokerURL:  *broker,
+               BrokerUser: *username,
+               BrokerPass: *password,
+               PubTopic:   *topic,
+               MsgSize:    *size,
+               MsgCount:   *count,
+               PubQoS:     byte(*pubqos),
+               KeepAlive:  *keepalive,
+               Quiet:      *quiet,
+           }
+           go c.run(pubResCh)
+       } else if *fin {
+           c := &PubClient{
+               ID:         i,
+               BrokerURL:  *broker,
+               BrokerUser: *username,
+               BrokerPass: *password,
+               PubTopic:   *topic,
+               MsgSize:    *size,
+               MsgCount:   *count,
+               PubQoS:     byte(*pubqos),
+               KeepAlive:  *keepalive,
+               Quiet:      *quiet,
+           }
+           go c.run(pubResCh)
+           break
+       } else {
+           c := &PubClient{
+               ID:         i,
+               BrokerURL:  *broker,
+               BrokerUser: *username,
+               BrokerPass: *password,
+               PubTopic:   *topic + "-" + strconv.Itoa(i),
+               MsgSize:    *size,
+               MsgCount:   *count,
+               PubQoS:     byte(*pubqos),
+               KeepAlive:  *keepalive,
+               Quiet:      *quiet,
+           }
+           go c.run(pubResCh)
+       }
+   }
+ 
+   // collect the publish results
+   pubresults := make([]*PubResults, *clients)
+   for i := 0; i < *clients; i++ {
+       pubresults[i] = <-pubResCh
+   }
+   totalTime := time.Now().Sub(start)
+   pubtotals := calculatePublishResults(pubresults, totalTime)
+ 
+   for i := 0; i < 3; i++ {
+       time.Sleep(1 * time.Second)
+       if !*quiet {
+           log.Printf("Benchmark will stop after %v seconds.\n", 3-i)
+       }
+   }
+ 
+   // notify subscriber that job done
+   for i := 0; i < *clients; i++ {
+       jobDone <- true
+   }
+ 
+   // collect subscribe results
+   subresults := make([]*SubResults, *clients)
+   for i := 0; i < *clients; i++ {
+       subresults[i] = <-subResCh
+   }
+ 
+   // collect the sub results
+   subtotals := calculateSubscribeResults(subresults, pubresults)
+ 
+   // print stats
+   printResults(pubresults, pubtotals, subresults, subtotals, *format)
+ 
+   if !*quiet {
+       log.Printf("All jobs done.\n")
+   }
 }
+
 
 func calculatePublishResults(pubresults []*PubResults, totalTime time.Duration) *TotalPubResults {
 	pubtotals := new(TotalPubResults)
