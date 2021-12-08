@@ -98,7 +98,7 @@ func main() {
        keepalive = flag.Int("keepalive", 60, "Keep alive period in seconds")
        format    = flag.String("format", "text", "Output format: text|json")
        quiet     = flag.Bool("quiet", false, "Suppress logs while running")
-       frequency = flag.Duration("frequency", 1, "Number of publications per second")
+       frequency = flag.Int("frequency", 1, "Number of publications per second")
    )
  
    flag.Parse()
@@ -171,7 +171,7 @@ SUBJOBDONE:
         if !*fout && !*fin{
             std_topic = *topic + "-" + strconv.Itoa(i)
         }
-       time.Sleep(*frequency)
+       time.Sleep(time.Duration(1/ *frequency))
        c := &PubClient{
             ID:         i,
             BrokerURL:  *broker,
