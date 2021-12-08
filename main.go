@@ -98,6 +98,7 @@ func main() {
        keepalive = flag.Int("keepalive", 60, "Keep alive period in seconds")
        format    = flag.String("format", "text", "Output format: text|json")
        quiet     = flag.Bool("quiet", false, "Suppress logs while running")
+       frequency = flag.Duration("frequency", 0, "Number of publications per second")
    )
  
    flag.Parse()
@@ -182,6 +183,7 @@ SUBJOBDONE:
    pubResCh := make(chan *PubResults)
    start := time.Now()
    for i := 0; i < *clients; i++ {
+       time.Sleep(*frequency)
        if *fout {
            c := &PubClient{
                ID:         i,
