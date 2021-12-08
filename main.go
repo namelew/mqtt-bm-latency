@@ -98,7 +98,7 @@ func main() {
        keepalive = flag.Int("keepalive", 60, "Keep alive period in seconds")
        format    = flag.String("format", "text", "Output format: text|json")
        quiet     = flag.Bool("quiet", false, "Suppress logs while running")
-       frequency = flag.Duration("frequency", 0, "Number of publications per second")
+       frequency = flag.Duration("frequency", 1, "Number of publications per second")
    )
  
    flag.Parse()
@@ -109,6 +109,14 @@ func main() {
    if *fin && *fout {
        log.Fatal("Invalid arguments")
    }
+
+   pub_clients := *clients
+   sub_clients := *clients
+   if *fin{
+       sub_clients = 1
+   } else if *fout{
+       pub_clients = 1
+   }
  
    //start subscribe
  
@@ -116,50 +124,27 @@ func main() {
    jobDone := make(chan bool)
    subDone := make(chan bool)
    subCnt := 0
+   std_topic := *topic
  
    if !*quiet {
        log.Printf("Starting subscribe..\n")
    }
  
-   for i := 0; i < *clients; i++ {
-       if *fin {
-           sub := &SubClient{
-               ID:         i,
-               BrokerURL:  *broker,
-               BrokerUser: *username,
-               BrokerPass: *password,
-               SubTopic:   *topic,
-               SubQoS:     byte(*subqos),
-               KeepAlive:  *keepalive,
-               Quiet:      *quiet,
-           }
-           go sub.run(subResCh, subDone, jobDone)
-       } else if *fout {
-           sub := &SubClient{
-               ID:         i,
-               BrokerURL:  *broker,
-               BrokerUser: *username,
-               BrokerPass: *password,
-               SubTopic:   *topic,
-               SubQoS:     byte(*subqos),
-               KeepAlive:  *keepalive,
-               Quiet:      *quiet,
-           }
-           go sub.run(subResCh, subDone, jobDone)
-           break
-       } else {
-           sub := &SubClient{
-               ID:         i,
-               BrokerURL:  *broker,
-               BrokerUser: *username,
-               BrokerPass: *password,
-               SubTopic:   *topic + "-" + strconv.Itoa(i),
-               SubQoS:     byte(*subqos),
-               KeepAlive:  *keepalive,
-               Quiet:      *quiet,
-           }
-           go sub.run(subResCh, subDone, jobDone)
-       }
+   for i := 0; i < sub_clients; i++ {
+        if !*fout && !*fin{
+            std_topic = *topic + "-" + strconv.Itoa(i)
+        }
+        sub := &SubClient{
+            ID:         i,
+            BrokerURL:  *broker,
+            BrokerUser: *username,
+            BrokerPass: *password,
+            SubTopic:   std_topic,
+            SubQoS:     byte(*subqos),
+            KeepAlive:  *keepalive,
+            Quiet:      *quiet,
+        }
+        go sub.run(subResCh, subDone, jobDone)
    }
  
 SUBJOBDONE:
@@ -167,7 +152,7 @@ SUBJOBDONE:
        select {
        case <-subDone:
            subCnt++
-           if subCnt == *clients {
+           if subCnt == sub_clients {
                if !*quiet {
                    log.Printf("all subscribe job done.\n")
                }
@@ -182,57 +167,29 @@ SUBJOBDONE:
    }
    pubResCh := make(chan *PubResults)
    start := time.Now()
-   for i := 0; i < *clients; i++ {
+   for i := 0; i < pub_clients; i++ {
+        if !*fout && !*fin{
+            std_topic = *topic + "-" + strconv.Itoa(i)
+        }
        time.Sleep(*frequency)
-       if *fout {
-           c := &PubClient{
-               ID:         i,
-               BrokerURL:  *broker,
-               BrokerUser: *username,
-               BrokerPass: *password,
-               PubTopic:   *topic,
-               MsgSize:    *size,
-               MsgCount:   *count,
-               PubQoS:     byte(*pubqos),
-               KeepAlive:  *keepalive,
-               Quiet:      *quiet,
-           }
-           go c.run(pubResCh)
-       } else if *fin {
-           c := &PubClient{
-               ID:         i,
-               BrokerURL:  *broker,
-               BrokerUser: *username,
-               BrokerPass: *password,
-               PubTopic:   *topic,
-               MsgSize:    *size,
-               MsgCount:   *count,
-               PubQoS:     byte(*pubqos),
-               KeepAlive:  *keepalive,
-               Quiet:      *quiet,
-           }
-           go c.run(pubResCh)
-           break
-       } else {
-           c := &PubClient{
-               ID:         i,
-               BrokerURL:  *broker,
-               BrokerUser: *username,
-               BrokerPass: *password,
-               PubTopic:   *topic + "-" + strconv.Itoa(i),
-               MsgSize:    *size,
-               MsgCount:   *count,
-               PubQoS:     byte(*pubqos),
-               KeepAlive:  *keepalive,
-               Quiet:      *quiet,
-           }
-           go c.run(pubResCh)
-       }
+       c := &PubClient{
+            ID:         i,
+            BrokerURL:  *broker,
+            BrokerUser: *username,
+            BrokerPass: *password,
+            PubTopic:   std_topic,
+            MsgSize:    *size,
+            MsgCount:   *count,
+            PubQoS:     byte(*pubqos),
+            KeepAlive:  *keepalive,
+            Quiet:      *quiet,
+        }
+        go c.run(pubResCh)
    }
  
    // collect the publish results
-   pubresults := make([]*PubResults, *clients)
-   for i := 0; i < *clients; i++ {
+   pubresults := make([]*PubResults, pub_clients)
+   for i := 0; i < pub_clients; i++ {
        pubresults[i] = <-pubResCh
    }
    totalTime := time.Now().Sub(start)
@@ -246,13 +203,13 @@ SUBJOBDONE:
    }
  
    // notify subscriber that job done
-   for i := 0; i < *clients; i++ {
-       jobDone <- true
+   for i := 0; i < sub_clients; i++ {
+        jobDone <- true
    }
  
    // collect subscribe results
-   subresults := make([]*SubResults, *clients)
-   for i := 0; i < *clients; i++ {
+   subresults := make([]*SubResults, sub_clients)
+   for i := 0; i < sub_clients; i++ {
        subresults[i] = <-subResCh
    }
  
