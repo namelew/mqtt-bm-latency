@@ -193,7 +193,7 @@ SUBJOBDONE:
        pubresults[i] = <-pubResCh
    }
    totalTime := time.Now().Sub(start)
-   pubtotals := calculatePublishResults(pubresults, totalTime)
+   pubtotals := calculatePublishResults(pubresults, totalTime, *fout)
  
    for i := 0; i < 3; i++ {
        time.Sleep(1 * time.Second)
@@ -214,7 +214,7 @@ SUBJOBDONE:
    }
  
    // collect the sub results
-   subtotals := calculateSubscribeResults(subresults, pubresults)
+   subtotals := calculateSubscribeResults(subresults, pubresults, *fin)
  
    // print stats
    printResults(pubresults, pubtotals, subresults, subtotals, *format)
@@ -225,7 +225,7 @@ SUBJOBDONE:
 }
 
 
-func calculatePublishResults(pubresults []*PubResults, totalTime time.Duration) *TotalPubResults {
+func calculatePublishResults(pubresults []*PubResults, totalTime time.Duration, fout bool) *TotalPubResults {
 	pubtotals := new(TotalPubResults)
 	pubtotals.TotalRunTime = totalTime.Seconds()
 
@@ -257,12 +257,16 @@ func calculatePublishResults(pubresults []*PubResults, totalTime time.Duration) 
 	pubtotals.AvgMsgsPerSec = stats.StatsMean(msgsPerSecs)
 	pubtotals.AvgRunTime = stats.StatsMean(runTimes)
 	pubtotals.PubTimeMeanAvg = stats.StatsMean(pubTimeMeans)
-	pubtotals.PubTimeMeanStd = stats.StatsSampleStandardDeviation(pubTimeMeans)
+	if fout{
+		pubtotals.PubTimeMeanStd = pubresults[0].PubTimeStd
+	}else{
+		pubtotals.PubTimeMeanStd = stats.StatsSampleStandardDeviation(pubTimeMeans)
+	}
 
 	return pubtotals
 }
 
-func calculateSubscribeResults(subresults []*SubResults, pubresults []*PubResults) *TotalSubResults {
+func calculateSubscribeResults(subresults []*SubResults, pubresults []*PubResults, fin bool) *TotalSubResults {
 	subtotals := new(TotalSubResults)
 	fwdLatencyMeans := make([]float64, len(subresults))
 
@@ -288,7 +292,11 @@ func calculateSubscribeResults(subresults []*SubResults, pubresults []*PubResult
 		}
 	}
 	subtotals.FwdLatencyMeanAvg = stats.StatsMean(fwdLatencyMeans)
-	subtotals.FwdLatencyMeanStd = stats.StatsSampleStandardDeviation(fwdLatencyMeans)
+	if fin{
+		subtotals.FwdLatencyMeanStd = subresults[0].FwdLatencyStd
+	} else{
+		subtotals.FwdLatencyMeanStd = stats.StatsSampleStandardDeviation(fwdLatencyMeans)
+	}
 	subtotals.TotalFwdRatio = float64(subtotals.TotalReceived) / float64(subtotals.TotalPublished)
 	return subtotals
 }
